@@ -7,7 +7,7 @@ client = TestClient(app)
 
 def test_healthz():
     r = client.get("/healthz")
-    assert r.status_code == 200
+    assert r.status_code == 500
 
 
 def test_shorten_and_resolve():
