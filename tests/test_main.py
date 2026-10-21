@@ -21,3 +21,8 @@ def test_shorten_and_resolve():
 
 def test_unknown_code_returns_404():
     assert client.get("/nope").status_code == 404
+
+
+def test_shorten_invalid_url_returns_422():
+    r = client.post("/shorten", json={"url": "not-a-url"})
+    assert r.status_code == 422
