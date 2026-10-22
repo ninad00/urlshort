@@ -1,11 +1,14 @@
 FROM python:3.13-slim AS builder
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+WORKDIR /build
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip uninstall -y pip
 
 FROM python:3.13-slim
-RUN useradd --create-home --uid 10001 appuser
+RUN python -m pip uninstall -y pip \
+    && useradd -l --create-home --uid 10001 appuser
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
