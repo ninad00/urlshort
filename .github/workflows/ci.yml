@@ -45,14 +45,19 @@ jobs:
         if: always()
         run: coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
 
-  image:
+    image:
     needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      security-events: write          # needed to upload results to the Security tab
+    env:
+      TRIVY_VERSION: "0.69.3"         # one place to change the Trivy version
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@v3
       - id: meta
         uses: docker/metadata-action@v5
@@ -62,10 +67,11 @@ jobs:
             type=sha,format=long
             type=ref,event=branch
       - name: Build for testing
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
-          load: true
+          load: true                  # keep the image in the runner's Docker so Trivy can scan it
           tags: shortlink:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -74,6 +80,28 @@ jobs:
           docker run -d --name app -p 8000:8000 shortlink:test
           for i in $(seq 1 20); do curl -fsS localhost:8000/healthz && break; sleep 1; done
           curl -fsS localhost:8000/healthz
+
+      # 1. The gate: fail on serious bugs that have a fix
+      - name: Scan image (fail on fixable HIGH or CRITICAL)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v trivy-cache:/root/.cache/ \
+            aquasec/trivy:${TRIVY_VERSION} image \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 shortlink:test
+
+      # 2. The report: everything, uploaded to the Security tab
+      - name: Write SARIF report
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v trivy-cache:/root/.cache/ -v "$PWD:/out" \
+            aquasec/trivy:${TRIVY_VERSION} image --format sarif -o /out/trivy.sarif shortlink:test
+      - name: Upload to the Security tab
+        if: always() && steps.build.outcome == 'success'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -90,4 +118,4 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
+          cache-from: type=gha
