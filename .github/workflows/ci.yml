@@ -45,7 +45,7 @@ jobs:
         if: always()
         run: coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
 
-    image:
+  image:
     needs: test
     runs-on: ubuntu-latest
     permissions:
