@@ -23,6 +23,14 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: git diff "$BASE"...HEAD > pr.diff
+      - name: Test GitHub Models directly
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          curl -sS -i https://models.github.ai/inference/chat/completions \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"model":"openai/gpt-4.1-mini","messages":[{"role":"user","content":"say hi"}]}'
       - name: Review
         env:
           GITHUB_TOKEN: ${{ github.token }}
