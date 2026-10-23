@@ -87,7 +87,7 @@ jobs:
       - name: Smoke test
         run: |
           docker run -d --name app -p 8000:8000 shortlink:test
-          for i in $(seq 1 20); do curl -fsS localhost:8000/healthz && break; sleep 1; done
+          for _ in $(seq 1 20); do curl -fsS localhost:8000/healthz && break; sleep 1; done
           curl -fsS localhost:8000/healthz
 
       # 1. The gate: fail on serious vulnerabilities that have a fix
