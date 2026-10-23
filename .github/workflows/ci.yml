@@ -11,14 +11,16 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}  # never cancel a publish on main
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
       - run: pip install ruff
@@ -33,8 +35,10 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -51,27 +55,32 @@ jobs:
     permissions:
       contents: read
       packages: write
-      security-events: write          # needed to upload results to the Security tab
+      security-events: write          # upload results to the Security tab
+      id-token: write                 # cosign keyless signing
+      attestations: write             # build provenance attestation
     env:
-      TRIVY_VERSION: "0.69.3"         # one place to change the Trivy version
+      # Trivy 0.69.3, pinned by digest. One place to change it.
+      TRIVY_IMAGE: aquasec/trivy@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@v3
+      - name: Lowercase image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=sha,format=long
             type=ref,event=branch
       - name: Build for testing
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
-          load: true                  # keep the image in the runner's Docker so Trivy can scan it
+          load: true                  # keep the image locally so Trivy can scan it
           tags: shortlink:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -81,12 +90,12 @@ jobs:
           for i in $(seq 1 20); do curl -fsS localhost:8000/healthz && break; sleep 1; done
           curl -fsS localhost:8000/healthz
 
-      # 1. The gate: fail on serious bugs that have a fix
+      # 1. The gate: fail on serious vulnerabilities that have a fix
       - name: Scan image (fail on fixable HIGH or CRITICAL)
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
             -v trivy-cache:/root/.cache/ \
-            aquasec/trivy:${TRIVY_VERSION} image \
+            "$TRIVY_IMAGE" image \
             --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 shortlink:test
 
       # 2. The report: everything, uploaded to the Security tab
@@ -95,27 +104,45 @@ jobs:
         run: |
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
             -v trivy-cache:/root/.cache/ -v "$PWD:/out" \
-            aquasec/trivy:${TRIVY_VERSION} image --format sarif -o /out/trivy.sarif shortlink:test
+            "$TRIVY_IMAGE" image --format sarif -o /out/trivy.sarif shortlink:test
       - name: Upload to the Security tab
         if: always() && steps.build.outcome == 'success'
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@4bfa242aa49c5f7c6770b98670d354a7dfac05f8 # v3.39.1
         with:
           sarif_file: trivy.sarif
 
+      # 3. Publish: only from main, never from PRs or other branches
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Push
         id: push
-        if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v6
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+        if: github.ref == 'refs/heads/main'
+      - name: Sign the image (keyless)
+        if: github.ref == 'refs/heads/main'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+      - name: Attest build provenance
+        if: github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
