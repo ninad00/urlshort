@@ -71,7 +71,8 @@ GUARD = (
 def post(body: dict) -> dict:
     headers = {
         "Content-Type": "application/json",
-        "Accept": "application/json",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2026-03-10",
         "User-Agent": "shortlink-ci",
     }
     if token := os.environ.get("GITHUB_TOKEN"):
@@ -79,11 +80,11 @@ def post(body: dict) -> dict:
     req = urllib.request.Request(ENDPOINT, data=json.dumps(body).encode(), headers=headers)
     with urllib.request.urlopen(req, timeout=120) as resp:
         raw = resp.read().decode(errors="replace")
-        status, ctype = resp.status, resp.headers.get("Content-Type")
+        status, ctype, final_url = resp.status, resp.headers.get("Content-Type"), resp.url
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        sys.exit(f"Non-JSON reply from {ENDPOINT} (HTTP {status}, {ctype}):\n{raw[:500]!r}")
+        sys.exit(f"Non-JSON reply (HTTP {status}, {ctype}) from {final_url}:\n{raw[:500]!r}")
 
 
 def ask(system: str, data: str, tag: str = "data", max_chars: int = 12_000) -> str:
