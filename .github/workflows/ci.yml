@@ -49,6 +49,23 @@ jobs:
         if: always()
         run: coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
 
+  integration:
+    needs: lint
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    env:
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -v
+
   image:
     needs: test
     runs-on: ubuntu-latest
