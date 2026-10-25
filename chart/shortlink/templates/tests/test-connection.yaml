@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "shortlink.fullname" . }}-test-connection"
+  labels:
+    {{- include "shortlink.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: wget
+      image: busybox
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 10001
+        capabilities:
+          drop: [ALL]
+      command: ['wget']
+      args: ['-qO-', '{{ include "shortlink.fullname" . }}:{{ .Values.service.port }}']
+  restartPolicy: Never
