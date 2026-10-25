@@ -7,9 +7,21 @@ metadata:
   annotations:
     "helm.sh/hook": test
 spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
   containers:
     - name: wget
       image: busybox
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 10001
+        capabilities:
+          drop: [ALL]
       command: ['wget']
-      args: ['{{ include "shortlink.fullname" . }}:{{ .Values.service.port }}']
+      args: ['-qO-', '{{ include "shortlink.fullname" . }}:{{ .Values.service.port }}']
   restartPolicy: Never
